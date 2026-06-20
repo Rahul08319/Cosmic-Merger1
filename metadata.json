@@ -1,0 +1,6 @@
+{
+  "name": "Cosmic Merger",
+  "description": "A celestial drop-and-merge physical puzzle game where you drop moons, dwarf planets, gas giants, and stars into a cosmic jar to create a supernova.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
