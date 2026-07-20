@@ -1,6 +1,6 @@
 import React from "react";
 import { GameStats, CelestialType } from "../types";
-import { Trophy, Flame, ChevronRight, Zap, RefreshCw, Volume2, VolumeX, HelpCircle } from "lucide-react";
+import { Trophy, Flame, ChevronRight, Zap, RefreshCw, Volume2, VolumeX, HelpCircle, Pause, Play, Settings } from "lucide-react";
 import { getCelestialConfig } from "../constants";
 
 interface ScoreBoardProps {
@@ -14,6 +14,9 @@ interface ScoreBoardProps {
   onVolumeChange: (vol: number) => void;
   onOpenHelp: () => void;
   initialHighScore: number;
+  isPaused: boolean;
+  onTogglePause: () => void;
+  onOpenSettings: () => void;
 }
 
 export const ScoreBoard: React.FC<ScoreBoardProps> = ({
@@ -27,6 +30,9 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
   onVolumeChange,
   onOpenHelp,
   initialHighScore,
+  isPaused,
+  onTogglePause,
+  onOpenSettings,
 }) => {
   const nextBody = getCelestialConfig(nextBodyLevel);
 
@@ -136,32 +142,58 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
         </div>
       </div>
 
-      {/* Control Actions Panel (Shake, Refresh, Help) */}
+      {/* Control Actions Panel (Shake, Pause, Settings, Refresh, Help) */}
       <div className="flex flex-col gap-2 bg-black/20 p-2 rounded-2xl border border-white/5">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-5 gap-1.5">
           {/* Gravity Shake */}
           <button
             onClick={onShake}
-            disabled={!canShake}
+            disabled={!canShake || isPaused}
             id="gravity-shake-btn"
-            className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300 ${
-              canShake
+            className={`flex flex-col items-center justify-center p-2 rounded-xl border text-center transition-all duration-300 ${
+              canShake && !isPaused
                 ? "bg-amber-950/20 border-amber-500/40 text-amber-300 hover:bg-amber-900/10 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/5 active:scale-95"
                 : "bg-white/5 border-white/10 text-slate-500 cursor-not-allowed"
             }`}
             title="Perturb Gravity layout (Shake!)"
           >
-            <Zap className={`w-4 h-4 mb-1 ${canShake ? "animate-pulse" : ""}`} />
+            <Zap className={`w-4 h-4 mb-1 ${canShake && !isPaused ? "animate-pulse" : ""}`} />
             <span className="text-[9px] font-mono leading-none">
               {canShake ? "SHAKE" : `CD (${Math.ceil(shakeCooldown / 60)}s)`}
             </span>
+          </button>
+
+          {/* Pause / Resume simulation */}
+          <button
+            onClick={onTogglePause}
+            id="pause-simulation-btn"
+            className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-200 active:scale-95 ${
+              isPaused
+                ? "bg-violet-950/45 border-violet-500 text-violet-300 shadow-lg shadow-violet-500/10 animate-pulse"
+                : "border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white"
+            }`}
+            title={isPaused ? "Resume Cosmic Accretion" : "Pause Cosmic Accretion"}
+          >
+            {isPaused ? <Play className="w-4 h-4 mb-1 text-emerald-400" /> : <Pause className="w-4 h-4 mb-1" />}
+            <span className="text-[9px] font-mono leading-none">{isPaused ? "RESUME" : "PAUSE"}</span>
+          </button>
+
+          {/* Particle Aesthetics Settings */}
+          <button
+            onClick={onOpenSettings}
+            id="open-settings-btn"
+            className="flex flex-col items-center justify-center p-2 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
+            title="Aesthetics Settings"
+          >
+            <Settings className="w-4 h-4 mb-1" />
+            <span className="text-[9px] font-mono leading-none">THEME</span>
           </button>
 
           {/* Restart Game */}
           <button
             onClick={onRestart}
             id="restart-game-btn"
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
+            className="flex flex-col items-center justify-center p-2 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
             title="Restart System Core"
           >
             <RefreshCw className="w-4 h-4 mb-1" />
@@ -172,7 +204,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           <button
             onClick={onOpenHelp}
             id="open-how-to-play-btn"
-            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
+            className="flex flex-col items-center justify-center p-2 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
             title="Mission Instructions"
           >
             <HelpCircle className="w-4 h-4 mb-1" />

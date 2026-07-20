@@ -15,7 +15,9 @@ import {
   Shield,
   Zap,
   Activity,
-  X
+  X,
+  Pause,
+  Settings as SettingsIcon
 } from "lucide-react";
 
 import { PhysicsBody, Particle, GameStats } from "./types";
@@ -40,6 +42,8 @@ import { ScoreBoard } from "./components/ScoreBoard";
 import { ProgressionLegend } from "./components/ProgressionLegend";
 import { HowToPlay } from "./components/HowToPlay";
 import { HighScoresModal } from "./components/HighScoresModal";
+import { SettingsModal } from "./components/SettingsModal";
+import { DailyMissionCard } from "./components/DailyMissionCard";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -101,6 +105,338 @@ export default function App() {
   const [volume, setVolume] = useState(() => CosmicAudio.getVolume());
   const [toasts, setToasts] = useState<{ id: string; title: string; description: string; icon: string }[]>([]);
 
+  // Pause state and Ref to sync with high-frequency game loop
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  const togglePause = () => {
+    if (stats.isGameOver || !hasStarted) return;
+    setIsPaused(p => !p);
+  };
+
+  // Particle Trail Settings
+  const [particleAesthetic, setParticleAesthetic] = useState(() => {
+    try {
+      const stored = localStorage.getItem("cosmic_particle_aesthetic");
+      return stored || "nebula_dust";
+    } catch (e) {
+      return "nebula_dust";
+    }
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const handleParticleAestheticChange = (aesthetic: string) => {
+    setParticleAesthetic(aesthetic);
+    try {
+      localStorage.setItem("cosmic_particle_aesthetic", aesthetic);
+    } catch (e) {}
+  };
+
+  // Keyboard shortcut for pausing (Escape or 'P')
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when focusing inputs (if any)
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+        return;
+      }
+      if (e.key === "Escape" || e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        togglePause();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasStarted, stats.isGameOver, isPaused]);
+
+  // Daily Mission Systems
+  const [dailyMission, setDailyMission] = useState<any>(null);
+
+  const getDailyMissionForToday = () => {
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const DAILY_MISSIONS = [
+      {
+        id: "merge_luna",
+        goalType: "specific_level_merge",
+        targetValue: 5,
+        level: 1, // Luna is level 1
+        description: "Luna Eclipse: Merge 5 Luna bodies",
+        multiplier: 1.5,
+        scoreBonus: 500,
+      },
+      {
+        id: "merge_pluto",
+        goalType: "specific_level_merge",
+        targetValue: 4,
+        level: 2, // Pluto is level 2
+        description: "Pluto Pioneers: Merge 4 Pluto bodies",
+        multiplier: 1.5,
+        scoreBonus: 600,
+      },
+      {
+        id: "merge_mercury",
+        goalType: "specific_level_merge",
+        targetValue: 3,
+        level: 3, // Mercury is level 3
+        description: "Mercury Messenger: Merge 3 Mercury bodies",
+        multiplier: 1.6,
+        scoreBonus: 800,
+      },
+      {
+        id: "score_target",
+        goalType: "score_target",
+        targetValue: 1200,
+        description: "Cosmic Harvest: Accumulate 1,200 total score points",
+        multiplier: 1.5,
+        scoreBonus: 700,
+      },
+      {
+        id: "shake_usage",
+        goalType: "shake_usage",
+        targetValue: 3,
+        description: "Instability Purge: Activate 'Gravity Shake' 3 times",
+        multiplier: 1.5,
+        scoreBonus: 500,
+      }
+    ];
+    
+    const hash = todayStr.split('-').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const index = hash % DAILY_MISSIONS.length;
+    const baseMission = DAILY_MISSIONS[index];
+    
+    return {
+      ...baseMission,
+      currentValue: 0,
+      isCompleted: false,
+      date: todayStr,
+    };
+  };
+
+  const updateDailyMissionProgress = (type: string, value: number, details?: { level?: number }) => {
+    setDailyMission((prev: any) => {
+      if (!prev || prev.isCompleted) return prev;
+      
+      let matched = false;
+      if (prev.goalType === type) {
+        if (type === 'specific_level_merge') {
+          if (details?.level === prev.level) {
+            matched = true;
+          }
+        } else {
+          matched = true;
+        }
+      }
+
+      if (!matched) return prev;
+
+      const nextVal = Math.min(prev.targetValue, prev.currentValue + value);
+      const completed = nextVal >= prev.targetValue;
+      
+      const updated = {
+        ...prev,
+        currentValue: nextVal,
+        isCompleted: completed
+      };
+
+      try {
+        localStorage.setItem("cosmic_daily_mission", JSON.stringify(updated));
+      } catch (e) {}
+
+      if (completed && !prev.isCompleted) {
+        // Trigger a gorgeous toast to celebrate the completion!
+        const toastId = Math.random().toString();
+        setToasts(prevToasts => [...prevToasts, {
+          id: toastId,
+          title: "DAILY MISSION COMPLETE! 🎉",
+          description: `Completed "${prev.description}". Active score multiplier ${prev.multiplier}x is now unlocked!`,
+          icon: "Trophy"
+        }]);
+
+        // Award bonus score!
+        setStats(p => {
+          const nextScore = p.score + prev.scoreBonus;
+          const nextHighScore = Math.max(p.highScore, nextScore);
+          return {
+            ...p,
+            score: nextScore,
+            highScore: nextHighScore
+          };
+        });
+
+        // Play positive chime!
+        CosmicAudio.playMergePop(9);
+
+        setTimeout(() => {
+          setToasts(prevToasts => prevToasts.filter(t => t.id !== toastId));
+        }, 6000);
+      }
+
+      return updated;
+    });
+  };
+
+  // Autosave and Session Recovery states
+  const [hasAutosave, setHasAutosave] = useState(false);
+  const [autosaveInfo, setAutosaveInfo] = useState<{ score: number; timestamp: number } | null>(null);
+
+  const clearAutosave = () => {
+    try {
+      localStorage.removeItem("cosmic_merger_autosave_state");
+      setHasAutosave(false);
+      setAutosaveInfo(null);
+    } catch (e) {}
+  };
+
+  const handleRestoreAutosave = () => {
+    const savedGame = localStorage.getItem("cosmic_merger_autosave_state");
+    if (!savedGame) return;
+    try {
+      const parsed = JSON.parse(savedGame);
+      if (parsed && parsed.bodies) {
+        // Initialize sound context on user interaction click
+        CosmicAudio.init();
+        setVolume(CosmicAudio.getVolume());
+
+        // Map and parse deep physical coordinates safely
+        bodiesRef.current = parsed.bodies.map((b: any) => ({
+          id: b.id,
+          x: b.x,
+          y: b.y,
+          vx: b.vx,
+          vy: b.vy,
+          radius: b.radius,
+          mass: b.mass,
+          level: b.level,
+          angle: b.angle ?? 0,
+          angularVelocity: b.angularVelocity ?? 0,
+          opacity: b.opacity ?? 1.0,
+          shakingTime: b.shakingTime ?? 0,
+          isGhost: false,
+        }));
+
+        // Recover stats counters
+        setStats({
+          score: parsed.score ?? 0,
+          highScore: Math.max(stats.highScore, parsed.score ?? 0),
+          mergesCount: parsed.mergesCount ?? 0,
+          lastMergedName: parsed.lastMergedName ?? "",
+          isGameOver: false,
+          timeRemainingBeforeGameOver: parsed.timeRemainingBeforeGameOver ?? GAME_OVER_TIME_LIMIT,
+        });
+
+        if (parsed.highestLevelMerged !== undefined) {
+          setHighestLevelMerged(parsed.highestLevelMerged);
+          setHighlightedInspectLevel(parsed.highestLevelMerged);
+        }
+        if (parsed.currentHeldLevel !== undefined) {
+          setCurrentHeldLevel(parsed.currentHeldLevel);
+        }
+        if (parsed.nextHeldLevel !== undefined) {
+          setNextHeldLevel(parsed.nextHeldLevel);
+        }
+
+        // Set game state active
+        setHasStarted(true);
+
+        // Spawn visual confirmation toast
+        const toastId = Math.random().toString();
+        setToasts(t => [...t, {
+          id: toastId,
+          title: "NEBULA STATE RESTORED 💫",
+          description: `Successfully synchronized and restored celestial coordinates with mass score of ${parsed.score.toLocaleString()}!`,
+          icon: "Shield"
+        }]);
+        setTimeout(() => {
+          setToasts(t => t.filter(x => x.id !== toastId));
+        }, 5000);
+      }
+    } catch (e) {
+      console.error("Autosave state restore failed", e);
+    }
+  };
+
+  // Check for autosave and load daily mission on mount
+  useEffect(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const stored = localStorage.getItem("cosmic_daily_mission");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.date === todayStr) {
+          setDailyMission(parsed);
+        } else {
+          const newMission = getDailyMissionForToday();
+          setDailyMission(newMission);
+          localStorage.setItem("cosmic_daily_mission", JSON.stringify(newMission));
+        }
+      } catch (e) {
+        const newMission = getDailyMissionForToday();
+        setDailyMission(newMission);
+        localStorage.setItem("cosmic_daily_mission", JSON.stringify(newMission));
+      }
+    } else {
+      const newMission = getDailyMissionForToday();
+      setDailyMission(newMission);
+      localStorage.setItem("cosmic_daily_mission", JSON.stringify(newMission));
+    }
+
+    // Check for game autosave state
+    const savedGame = localStorage.getItem("cosmic_merger_autosave_state");
+    if (savedGame) {
+      try {
+        const parsed = JSON.parse(savedGame);
+        if (parsed && parsed.bodies && parsed.bodies.length > 0) {
+          setHasAutosave(true);
+          setAutosaveInfo({ score: parsed.score, timestamp: parsed.timestamp });
+        }
+      } catch (e) {}
+    }
+  }, []);
+
+  // Save game state periodically to survive accidental reloads
+  useEffect(() => {
+    if (!hasStarted || stats.isGameOver) return;
+
+    const interval = setInterval(() => {
+      const serializableBodies = bodiesRef.current.map(b => ({
+        id: b.id,
+        x: b.x,
+        y: b.y,
+        vx: b.vx,
+        vy: b.vy,
+        radius: b.radius,
+        mass: b.mass,
+        level: b.level,
+        angle: b.angle,
+        angularVelocity: b.angularVelocity,
+        opacity: b.opacity,
+        shakingTime: b.shakingTime,
+      }));
+
+      const stateToSave = {
+        bodies: serializableBodies,
+        score: stats.score,
+        mergesCount: stats.mergesCount,
+        lastMergedName: stats.lastMergedName,
+        highestLevelMerged,
+        currentHeldLevel,
+        nextHeldLevel,
+        timeRemainingBeforeGameOver: stats.timeRemainingBeforeGameOver,
+        timestamp: Date.now()
+      };
+
+      try {
+        localStorage.setItem("cosmic_merger_autosave_state", JSON.stringify(stateToSave));
+      } catch (e) {
+        console.warn("Autosave state failed to serialize", e);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [hasStarted, stats.score, stats.mergesCount, stats.lastMergedName, stats.isGameOver, highestLevelMerged, currentHeldLevel, nextHeldLevel, stats.timeRemainingBeforeGameOver]);
+
   // Load High Score from localStorage on Mount
   useEffect(() => {
     try {
@@ -137,219 +473,322 @@ export default function App() {
       // ----------------------------------------------------
       // 1. UPDATE STATES & PHYSICS
       // ----------------------------------------------------
-      // Tick Cooldowns
-      if (shakeCooldown > 0) {
-        setShakeCooldown(prev => prev - 1);
-      }
-      if (canvasShakeAmt > 0) {
-        setCanvasShakeAmt(prev => Math.max(0, prev - 0.5));
-      }
-
-      // Physics integration step
-      updatePhysicsBodies(
-        bodiesRef.current,
-        CONTAINER_WIDTH,
-        CONTAINER_HEIGHT,
-        0.28,             // Gravity
-        0.988,            // Friction/Drag
-        0.32              // Restitution (elastic bounce)
-      );
-
-      // Handle Merges inside Collision Resolution
-      const onBodiesMerge = (midX: number, midY: number, level: number, b1: PhysicsBody, b2: PhysicsBody) => {
-        const nextLevel = level + 1;
-        const config = getCelestialConfig(nextLevel);
-        const isSupernova = nextLevel === 10 && level === 9; // Black hole merger!
-
-        // Create the newly fused larger body
-        const mergedBody = createPhysicsBody(midX, midY, nextLevel);
-        
-        // Retain aggregate kinetic momentum with a soft upward propulsion bounce
-        mergedBody.vx = (b1.vx + b2.vx) * 0.45;
-        mergedBody.vy = Math.min(-2, (b1.vy + b2.vy) * 0.4) - 1.5; // launch thrust upward
-        mergedBody.shakingTime = 16.0; // trigger birth spring animation
-
-        bodiesRef.current.push(mergedBody);
-
-        // Combo calculations
-        const nowMs = Date.now();
-        let currentCombo = 1;
-        if (nowMs - comboRef.current.lastTime < 2000) {
-          comboRef.current.count += 1;
-          currentCombo = comboRef.current.count;
-        } else {
-          comboRef.current.count = 1;
-          currentCombo = 1;
+      if (!isPausedRef.current) {
+        // Tick Cooldowns
+        if (shakeCooldown > 0) {
+          setShakeCooldown(prev => prev - 1);
         }
-        comboRef.current.lastTime = nowMs;
+        if (canvasShakeAmt > 0) {
+          setCanvasShakeAmt(prev => Math.max(0, prev - 0.5));
+        }
 
-        // Score formulation with exponential multiplier
-        const baseScoreGain = (level + 1) * 15;
-        const multiplier = parseFloat(Math.pow(1.5, currentCombo - 1).toFixed(1));
-        const finalScoreGain = Math.round(baseScoreGain * multiplier);
+        // Physics integration step
+        updatePhysicsBodies(
+          bodiesRef.current,
+          CONTAINER_WIDTH,
+          CONTAINER_HEIGHT,
+          0.28,             // Gravity
+          0.988,            // Friction/Drag
+          0.32              // Restitution (elastic bounce)
+        );
 
-        // Spawn floating text for real-time visual feedback
-        floatingTextsRef.current.push({
-          x: midX,
-          y: midY - 15,
-          text: currentCombo > 1 ? `+${finalScoreGain} (${multiplier}x Combo!)` : `+${finalScoreGain}`,
-          color: config.color,
-          alpha: 1.0,
-          life: 45,
-          fontSize: currentCombo > 1 ? 14 : 12,
-          multiplier: currentCombo,
-        });
-        
-        // Spawn glowing stardust explosions
-        spawnMergeParticles(midX, midY, config.color, particlesRef.current, 24, isSupernova);
+        // Handle Merges inside Collision Resolution
+        const onBodiesMerge = (midX: number, midY: number, level: number, b1: PhysicsBody, b2: PhysicsBody) => {
+          const nextLevel = level + 1;
+          const config = getCelestialConfig(nextLevel);
+          const isSupernova = nextLevel === 10 && level === 9; // Black hole merger!
 
-        // Trigger dynamic synthesized sound effects
-        if (isSupernova) {
-          CosmicAudio.playSupernova();
-          setCanvasShakeAmt(18.0); // massive screen shake
+          // Create the newly fused larger body
+          const mergedBody = createPhysicsBody(midX, midY, nextLevel);
           
-          // Cosmic cleanse: Eliminate all low level bodies (level <= 4)
-          // Converting them to explosion energy stars!
-          bodiesRef.current = bodiesRef.current.filter(b => {
-            if (b.id === mergedBody.id) return true;
-            if (b.level <= 4) {
-              spawnMergeParticles(b.x, b.y, getCelestialConfig(b.level).color, particlesRef.current, 6, false);
-              return false; // delete
+          // Retain aggregate kinetic momentum with a soft upward propulsion bounce
+          mergedBody.vx = (b1.vx + b2.vx) * 0.45;
+          mergedBody.vy = Math.min(-2, (b1.vy + b2.vy) * 0.4) - 1.5; // launch thrust upward
+          mergedBody.shakingTime = 16.0; // trigger birth spring animation
+
+          bodiesRef.current.push(mergedBody);
+
+          // Combo calculations
+          const nowMs = Date.now();
+          let currentCombo = 1;
+          if (nowMs - comboRef.current.lastTime < 2000) {
+            comboRef.current.count += 1;
+            currentCombo = comboRef.current.count;
+          } else {
+            comboRef.current.count = 1;
+            currentCombo = 1;
+          }
+          comboRef.current.lastTime = nowMs;
+
+          // Score formulation with exponential multiplier
+          const baseScoreGain = (level + 1) * 15;
+          const multiplier = parseFloat(Math.pow(1.5, currentCombo - 1).toFixed(1));
+          let finalScoreGain = Math.round(baseScoreGain * multiplier);
+
+          // Check if a completed daily mission is active to award score bonus multiplier
+          let hasMissionBonus = false;
+          let missionMultiplier = 1.0;
+          setDailyMission((prev: any) => {
+            if (prev && prev.isCompleted) {
+              hasMissionBonus = true;
+              missionMultiplier = prev.multiplier;
             }
-            return true;
+            return prev;
           });
-        } else {
-          CosmicAudio.playMergePop(nextLevel);
-          setCanvasShakeAmt(4.5); // modest shockwave
-        }
 
-        // Update levels merged stats
-        setHighestLevelMerged(currentMax => {
-          const m = Math.max(currentMax, nextLevel);
-          setHighlightedInspectLevel(m);
-          return m;
-        });
+          if (hasMissionBonus) {
+            finalScoreGain = Math.round(finalScoreGain * missionMultiplier);
+          }
 
-        setStats(prev => {
-          const nextScore = prev.score + finalScoreGain;
-          const nextHighScore = Math.max(prev.highScore, nextScore);
+          // Custom visual theme color overrides
+          let mergeColor = config.color;
+          const aes = particleAestheticRef.current;
+          if (aes === "neon_fire") {
+            const fireColors = ["#ff3a00", "#ff6600", "#ff0077", "#ffaa00", "#ff2200"];
+            mergeColor = fireColors[Math.floor(Math.random() * fireColors.length)];
+          } else if (aes === "sparkling_crystals") {
+            const crystalColors = ["#00f3ff", "#00ffd5", "#ffffff", "#c077ff", "#77e8ff"];
+            mergeColor = crystalColors[Math.floor(Math.random() * crystalColors.length)];
+          }
+
+          // Spawn floating text with full details
+          let floatingText = `+${finalScoreGain}`;
+          if (currentCombo > 1 && hasMissionBonus) {
+            floatingText = `+${finalScoreGain} (${multiplier}x Combo • ${missionMultiplier}x Mission!)`;
+          } else if (currentCombo > 1) {
+            floatingText = `+${finalScoreGain} (${multiplier}x Combo!)`;
+          } else if (hasMissionBonus) {
+            floatingText = `+${finalScoreGain} (${missionMultiplier}x Mission!)`;
+          }
+
+          floatingTextsRef.current.push({
+            x: midX,
+            y: midY - 15,
+            text: floatingText,
+            color: mergeColor,
+            alpha: 1.0,
+            life: 45,
+            fontSize: currentCombo > 1 || hasMissionBonus ? 13 : 11,
+            multiplier: currentCombo,
+          });
           
-          if (nextHighScore > prev.highScore) {
-            try {
-              localStorage.setItem("cosmic_merger_highscore", nextHighScore.toString());
-            } catch (e) {
-              // ignore storage errors
-            }
-          }
+          // Spawn glowing stardust explosions
+          spawnMergeParticles(midX, midY, mergeColor, particlesRef.current, 24, isSupernova);
 
-          return {
-            ...prev,
-            score: nextScore,
-            highScore: nextHighScore,
-            mergesCount: prev.mergesCount + 1,
-            lastMergedName: config.name,
-          };
-        });
-      };
-
-      // Resolve colliders and keep active ones
-      bodiesRef.current = resolveCircleCollisions(bodiesRef.current, onBodiesMerge);
-
-      // Update and filter particles
-      particlesRef.current = updateTrailAndMoveParticles(
-        particlesRef.current,
-        CONTAINER_WIDTH,
-        CONTAINER_HEIGHT
-      );
-
-      // Check if there are no immediate merges possible in the jar
-      const nonGhostBodies = bodiesRef.current.filter(b => !b.isGhost);
-      const levels = nonGhostBodies.map(b => b.level);
-      const hasIdentical = levels.length !== new Set(levels).size;
-      const noMoves = nonGhostBodies.length >= 3 && !hasIdentical;
-      
-      setNoPossibleMoves(prev => {
-        if (prev !== noMoves) {
-          return noMoves;
-        }
-        return prev;
-      });
-
-      // Check Danger zone violation
-      // Check settled bodies intersecting the target threshold
-      let violatesDanger = false;
-      for (const b of bodiesRef.current) {
-        if (!b.isGhost && (b.y - b.radius) < DANGER_ZONE_Y) {
-          // If body is moving very slowly or grounded, it triggers danger
-          if (Math.abs(b.vy) < 0.4 && Math.abs(b.vx) < 0.4) {
-            violatesDanger = true;
-            break;
-          }
-        }
-      }
-
-      if (violatesDanger) {
-        warningPulseTime += 16.67; // approx ms per frame
-        
-        // Soft pulsing beep radar sound every 1.5 seconds under active warning
-        if (Math.floor(warningPulseTime / 16.67) % 70 === 0) {
-          CosmicAudio.playWarningBeep();
-        }
-
-        setStats(prev => {
-          const remaining = Math.max(0, prev.timeRemainingBeforeGameOver - 16.67);
-          if (remaining === 0 && !prev.isGameOver) {
-            // Trigger game over catastrophic explosion rumbles
+          // Trigger dynamic synthesized sound effects
+          if (isSupernova) {
             CosmicAudio.playSupernova();
+            setCanvasShakeAmt(18.0); // massive screen shake
+            
+            // Cosmic cleanse: Eliminate all low level bodies (level <= 4)
+            bodiesRef.current = bodiesRef.current.filter(b => {
+              if (b.id === mergedBody.id) return true;
+              if (b.level <= 4) {
+                spawnMergeParticles(b.x, b.y, getCelestialConfig(b.level).color, particlesRef.current, 6, false);
+                return false; // delete
+              }
+              return true;
+            });
+          } else {
+            CosmicAudio.playMergePop(nextLevel);
+            setCanvasShakeAmt(4.5); // modest shockwave
+          }
+
+          // Update levels merged stats
+          setHighestLevelMerged(currentMax => {
+            const m = Math.max(currentMax, nextLevel);
+            setHighlightedInspectLevel(m);
+            return m;
+          });
+
+          setStats(prev => {
+            const nextScore = prev.score + finalScoreGain;
+            const nextHighScore = Math.max(prev.highScore, nextScore);
+            
+            if (nextHighScore > prev.highScore) {
+              try {
+                localStorage.setItem("cosmic_merger_highscore", nextHighScore.toString());
+              } catch (e) {
+                // ignore storage errors
+              }
+            }
+
             return {
               ...prev,
-              isGameOver: true,
-              timeRemainingBeforeGameOver: 0,
+              score: nextScore,
+              highScore: nextHighScore,
+              mergesCount: prev.mergesCount + 1,
+              lastMergedName: config.name,
             };
-          }
-          return {
-            ...prev,
-            timeRemainingBeforeGameOver: remaining,
-          };
-        });
-      } else {
-        // Slowly recover warning meter back to full status ratio
-        warningPulseTime = 0;
-        setStats(prev => {
-          if (prev.isGameOver) return prev;
-          return {
-            ...prev,
-            timeRemainingBeforeGameOver: Math.min(
-              GAME_OVER_TIME_LIMIT,
-              prev.timeRemainingBeforeGameOver + 25 // rapid recharge back
-            ),
-          };
-        });
-      }
-
-      // Add soft cosmic background wind trail for highly dynamic objects
-      for (const b of bodiesRef.current) {
-        const velSq = b.vx * b.vx + b.vy * b.vy;
-        if (velSq > 1.8 && Math.random() < 0.35) {
-          const config = CELESTIAL_BODIES[b.level];
-          // spawn trail behind displacement vector
-          const trailAngle = Math.atan2(b.vy, b.vx) + Math.PI;
-          const px = b.x + Math.cos(trailAngle) * b.radius;
-          const py = b.y + Math.sin(trailAngle) * b.radius;
-          particlesRef.current.push({
-            x: px,
-            y: py,
-            vx: (Math.random() - 0.5) * 0.4 - b.vx * 0.25,
-            vy: (Math.random() - 0.5) * 0.4 - b.vy * 0.25,
-            color: config.color,
-            radius: 1.0 + Math.random() * 2.0,
-            alpha: 0.8,
-            life: 15 + Math.random() * 10,
-            maxLife: 25,
-            spin: Math.random() * Math.PI * 2,
-            spinSpeed: 0.1,
-            isSpark: false
           });
+
+          // Update daily mission progress inside merge using functional state (independent of external React states)
+          setDailyMission((prev: any) => {
+            if (!prev || prev.isCompleted) return prev;
+            let matched = false;
+            if (prev.goalType === 'specific_level_merge' && prev.level === level) {
+              matched = true;
+            } else if (prev.goalType === 'score_target') {
+              matched = true;
+            }
+
+            if (!matched) return prev;
+
+            const nextVal = Math.min(prev.targetValue, prev.currentValue + (prev.goalType === 'score_target' ? finalScoreGain : 1));
+            const completed = nextVal >= prev.targetValue;
+            const updated = { ...prev, currentValue: nextVal, isCompleted: completed };
+            try {
+              localStorage.setItem("cosmic_daily_mission", JSON.stringify(updated));
+            } catch (e) {}
+
+            if (completed && !prev.isCompleted) {
+              const toastId = Math.random().toString();
+              setToasts(t => [...t, {
+                id: toastId,
+                title: "DAILY MISSION COMPLETE! 🎉",
+                description: `Completed "${prev.description}". Active score multiplier ${prev.multiplier}x is now unlocked!`,
+                icon: "Trophy"
+              }]);
+              setStats(p => {
+                const nextScore = p.score + prev.scoreBonus;
+                const nextHighScore = Math.max(p.highScore, nextScore);
+                return { ...p, score: nextScore, highScore: nextHighScore };
+              });
+              CosmicAudio.playMergePop(9);
+              setTimeout(() => {
+                setToasts(t => t.filter(x => x.id !== toastId));
+              }, 6000);
+            }
+            return updated;
+          });
+        };
+
+        // Resolve colliders and keep active ones
+        bodiesRef.current = resolveCircleCollisions(bodiesRef.current, onBodiesMerge);
+
+        // Update and filter particles
+        particlesRef.current = updateTrailAndMoveParticles(
+          particlesRef.current,
+          CONTAINER_WIDTH,
+          CONTAINER_HEIGHT
+        );
+
+        // If neon fire, apply extra warmth upward float to active particles
+        if (particleAestheticRef.current === "neon_fire") {
+          for (const p of particlesRef.current) {
+            p.vy -= 0.05; // soft warmth upward drift
+          }
+        }
+
+        // Check if there are no immediate merges possible in the jar
+        const nonGhostBodies = bodiesRef.current.filter(b => !b.isGhost);
+        const levels = nonGhostBodies.map(b => b.level);
+        const hasIdentical = levels.length !== new Set(levels).size;
+        const noMoves = nonGhostBodies.length >= 3 && !hasIdentical;
+        
+        setNoPossibleMoves(prev => {
+          if (prev !== noMoves) {
+            return noMoves;
+          }
+          return prev;
+        });
+
+        // Check Danger zone violation
+        let violatesDanger = false;
+        for (const b of bodiesRef.current) {
+          if (!b.isGhost && (b.y - b.radius) < DANGER_ZONE_Y) {
+            if (Math.abs(b.vy) < 0.4 && Math.abs(b.vx) < 0.4) {
+              violatesDanger = true;
+              break;
+            }
+          }
+        }
+
+        if (violatesDanger) {
+          warningPulseTime += 16.67;
+          if (Math.floor(warningPulseTime / 16.67) % 70 === 0) {
+            CosmicAudio.playWarningBeep();
+          }
+
+          setStats(prev => {
+            const remaining = Math.max(0, prev.timeRemainingBeforeGameOver - 16.67);
+            if (remaining === 0 && !prev.isGameOver) {
+              CosmicAudio.playSupernova();
+              return {
+                ...prev,
+                isGameOver: true,
+                timeRemainingBeforeGameOver: 0,
+              };
+            }
+            return {
+              ...prev,
+              timeRemainingBeforeGameOver: remaining,
+            };
+          });
+        } else {
+          warningPulseTime = 0;
+          setStats(prev => {
+            if (prev.isGameOver) return prev;
+            return {
+              ...prev,
+              timeRemainingBeforeGameOver: Math.min(
+                GAME_OVER_TIME_LIMIT,
+                prev.timeRemainingBeforeGameOver + 25
+              ),
+            };
+          });
+        }
+
+        // Add soft cosmic background wind trail for highly dynamic objects
+        for (const b of bodiesRef.current) {
+          const velSq = b.vx * b.vx + b.vy * b.vy;
+          if (velSq > 1.8 && Math.random() < 0.35) {
+            const config = getCelestialConfig(b.level);
+            const trailAngle = Math.atan2(b.vy, b.vx) + Math.PI;
+            const px = b.x + Math.cos(trailAngle) * b.radius;
+            const py = b.y + Math.sin(trailAngle) * b.radius;
+            
+            let pColor = config.color;
+            let pVx = (Math.random() - 0.5) * 0.4 - b.vx * 0.25;
+            let pVy = (Math.random() - 0.5) * 0.4 - b.vy * 0.25;
+            let pRadius = 1.0 + Math.random() * 2.0;
+            let pMaxLife = 25;
+            let pLife = 15 + Math.random() * 10;
+            let pIsSpark = false;
+
+            const aesthetic = particleAestheticRef.current;
+            if (aesthetic === "neon_fire") {
+              const fireColors = ["#ff3a00", "#ff6600", "#ff0077", "#ffaa00", "#ff2200"];
+              pColor = fireColors[Math.floor(Math.random() * fireColors.length)];
+              pVy -= 0.6; // rise upwards like fire embers
+              pRadius = 1.5 + Math.random() * 2.5;
+              pMaxLife = 18;
+              pLife = 10 + Math.random() * 8;
+              pIsSpark = Math.random() < 0.3; // some sparks!
+            } else if (aesthetic === "sparkling_crystals") {
+              const crystalColors = ["#00f3ff", "#00ffd5", "#ffffff", "#c077ff", "#77e8ff"];
+              pColor = crystalColors[Math.floor(Math.random() * crystalColors.length)];
+              pRadius = 1.2 + Math.random() * 1.8;
+              pMaxLife = 30;
+              pLife = 20 + Math.random() * 10;
+              pIsSpark = true; // crystal diamonds!
+            }
+
+            particlesRef.current.push({
+              x: px,
+              y: py,
+              vx: pVx,
+              vy: pVy,
+              color: pColor,
+              radius: pRadius,
+              alpha: 0.8,
+              life: pLife,
+              maxLife: pMaxLife,
+              spin: Math.random() * Math.PI * 2,
+              spinSpeed: 0.1,
+              isSpark: pIsSpark
+            });
+          }
         }
       }
 
@@ -445,9 +884,9 @@ export default function App() {
         for (const b of bodiesRef.current) {
           if (b.isGhost) continue;
           const xDist = Math.abs(b.x - previewX);
-          if (xDist < b.radius + CELESTIAL_BODIES[currentHeldLevel].radius) {
+          if (xDist < b.radius + getCelestialConfig(currentHeldLevel).radius) {
             // Circle block intercept calculation
-            const radialSpan = b.radius + CELESTIAL_BODIES[currentHeldLevel].radius;
+            const radialSpan = b.radius + getCelestialConfig(currentHeldLevel).radius;
             const diffSq = radialSpan * radialSpan - xDist * xDist;
             const potentialY = b.y - Math.sqrt(Math.max(0, diffSq));
             if (potentialY < targetDropY && potentialY > 60) {
@@ -489,7 +928,22 @@ export default function App() {
         const ratio = Math.max(0, p.life / p.maxLife);
         const currentRadius = p.radius * (0.35 + 0.65 * ratio);
         
-        if (p.isSpark) {
+        const aesthetic = particleAestheticRef.current;
+        if (aesthetic === "sparkling_crystals") {
+          // Draw as a beautiful diamond/crystal
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.spin);
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.moveTo(0, -currentRadius * 2.2);
+          ctx.lineTo(currentRadius * 1.3, 0);
+          ctx.lineTo(0, currentRadius * 2.2);
+          ctx.lineTo(-currentRadius * 1.3, 0);
+          ctx.closePath();
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = p.color;
+          ctx.fill();
+        } else if (p.isSpark) {
           // Draw a tiny rotating 4-pointed sparkle
           ctx.translate(p.x, p.y);
           ctx.rotate(p.spin);
@@ -508,7 +962,7 @@ export default function App() {
           ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
           ctx.fillStyle = p.color;
           // Add a subtle particle shadow glow
-          ctx.shadowBlur = 6;
+          ctx.shadowBlur = aesthetic === "neon_fire" ? 10 : 6;
           ctx.shadowColor = p.color;
           ctx.fill();
         }
@@ -792,6 +1246,12 @@ export default function App() {
 
       ctx.restore(); // restore final screen shakes translate map
 
+      // If paused, apply premium semi-transparent dim overlay to canvas
+      if (isPausedRef.current) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+        ctx.fillRect(0, 0, CONTAINER_WIDTH, CONTAINER_HEIGHT);
+      }
+
       animFrame = requestAnimationFrame(gameLoop);
     };
 
@@ -801,7 +1261,7 @@ export default function App() {
 
   // Handle Drop launch release
   const handleDropRelease = () => {
-    if (!hasStarted || stats.isGameOver || dropCooldown || !isHolding) return;
+    if (!hasStarted || stats.isGameOver || dropCooldown || !isHolding || isPaused) return;
 
     // Spawn new physical body in simulation reference list
     const newBody = createPhysicsBody(previewX, 70, currentHeldLevel);
@@ -826,12 +1286,13 @@ export default function App() {
 
   // Coordinated mouse/finger trace mappings
   const handleMoveAction = (clientX: number) => {
+    if (isPaused) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
     const touchXOnCanvas = clientX - rect.left;
-    const bodyRad = CELESTIAL_BODIES[currentHeldLevel].radius;
+    const bodyRad = getCelestialConfig(currentHeldLevel).radius;
 
     // Boundary cap preview element with absolute container limits
     const cappedX = Math.max(bodyRad + 12, Math.min(CONTAINER_WIDTH - bodyRad - 12, touchXOnCanvas));
@@ -847,6 +1308,8 @@ export default function App() {
   const restartGame = () => {
     bodiesRef.current = [];
     particlesRef.current = [];
+    clearAutosave();
+    setIsPaused(false);
     setStats({
       score: 0,
       highScore: stats.highScore,
@@ -868,7 +1331,7 @@ export default function App() {
   };
 
   const triggerGravityShake = () => {
-    if (shakeCooldown > 0 || stats.isGameOver) return;
+    if (shakeCooldown > 0 || stats.isGameOver || isPaused) return;
 
     // Launch gravity disturbance impulse to all objects
     for (const b of bodiesRef.current) {
@@ -881,6 +1344,9 @@ export default function App() {
     setCanvasShakeAmt(9.0);
     CosmicAudio.playSupernova(); // plays massive deep rumbling sound
     setShakeCooldown(650); // reset frame cooldown (approx 10-11 seconds)
+
+    // Track gravity shake usage for daily missions
+    updateDailyMissionProgress('shake_usage', 1);
   };
 
   const handleVolumeChange = (newVol: number) => {
@@ -1204,6 +1670,56 @@ export default function App() {
                       GRAVITY ANOMALY: {Math.ceil(stats.timeRemainingBeforeGameOver / 1000)}s BEFORE IMPLOSION!
                     </div>
                   )}
+
+                  {/* High-fidelity Pause Overlay Panel */}
+                  <AnimatePresence>
+                    {isPaused && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-black/60 backdrop-blur-[6px] z-30 flex flex-col items-center justify-center p-6 text-center"
+                      >
+                        <motion.div
+                          initial={{ scale: 0.9, y: 15 }}
+                          animate={{ scale: 1, y: 0 }}
+                          exit={{ scale: 0.9, y: 15 }}
+                          transition={{ type: "spring", damping: 25, stiffness: 350 }}
+                          className="glass-panel p-6 rounded-2xl max-w-sm w-full flex flex-col items-center justify-center border border-violet-500/30 bg-slate-950/80 shadow-2xl shadow-violet-500/10"
+                        >
+                          <div className="w-14 h-14 rounded-full bg-violet-500/15 border border-violet-500/30 flex items-center justify-center mb-4 text-violet-400 animate-pulse">
+                            <Pause className="w-6 h-6" />
+                          </div>
+                          
+                          <h3 className="text-lg font-display font-bold text-white tracking-tight">NEBULA SIMULATION SUSPENDED</h3>
+                          <p className="text-xs text-purple-200 mt-2 font-mono leading-relaxed">
+                            Physical state coordinates have been securely frozen in local spacetime.
+                          </p>
+
+                          <div className="mt-5 w-full flex flex-col gap-2">
+                            <button
+                              onClick={() => setIsPaused(false)}
+                              className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-mono py-3 rounded-xl border border-violet-400/20 flex items-center justify-center gap-2 font-bold tracking-wider transition-all duration-200 shadow-lg shadow-violet-500/20 active:scale-95"
+                            >
+                              <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
+                              RESUME SIMULATION
+                            </button>
+                            
+                            <button
+                              onClick={restartGame}
+                              className="w-full bg-white/5 hover:bg-white/10 text-purple-200 hover:text-white text-xs font-mono py-2.5 rounded-xl border border-white/5 transition-all duration-150 active:scale-95"
+                            >
+                              ABANDON & RESTART
+                            </button>
+                          </div>
+
+                          <div className="mt-4 text-[9px] font-mono text-purple-400/60 uppercase tracking-widest">
+                            Press ESC or P to Resume
+                          </div>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Sub-label coordinates info */}
@@ -1232,6 +1748,9 @@ export default function App() {
                     onVolumeChange={handleVolumeChange}
                     onOpenHelp={() => setIsHelpOpen(true)}
                     initialHighScore={initialHighScoreRef.current}
+                    isPaused={isPaused}
+                    onTogglePause={togglePause}
+                    onOpenSettings={() => setIsSettingsOpen(true)}
                   />
                 </motion.div>
 
