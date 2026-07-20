@@ -133,6 +133,78 @@ export const CELESTIAL_BODIES: CelestialType[] = [
   }
 ];
 
+export function getCelestialConfig(level: number): CelestialType {
+  if (level >= 0 && level < CELESTIAL_BODIES.length) {
+    return CELESTIAL_BODIES[level];
+  }
+
+  // Procedural generation for unlimited stars and planets (level >= 11)
+  const excess = level - (CELESTIAL_BODIES.length - 1);
+
+  // Increase radius slowly so it is still playable in the physical container
+  const radius = Math.min(200, 144 + excess * 6);
+  // Mass scales exponentially
+  const mass = 150.0 * Math.pow(1.25, excess);
+
+  // High-vibrancy cosmic HSL palettes
+  const hue = (level * 57) % 360;
+  const color = `hsl(${hue}, 88%, 52%)`;
+  const gradientStart = `hsl(${(hue + 25) % 360}, 95%, 72%)`;
+  const gradientEnd = `hsl(${(hue - 35 + 360) % 360}, 85%, 22%)`;
+  const glowColor = `hsla(${hue}, 90%, 60%, 0.65)`;
+
+  const prefixes = [
+    "Magnetar", "Quasar", "Andromeda", "Laniakea", "Multiverse", "Supergiant", 
+    "Hypernova", "Void", "Infinity", "Chronos", "Omniverse", "Astro", "Nova", 
+    "Genesis", "Singularity", "Cosmos", "Exotic", "Pulsar", "Nebula", "Vortex"
+  ];
+  const types = [
+    "Core", "Nexus", "Singularity", "Web", "Hub", "Gateway", "Tear", "Seed", 
+    "Cluster", "Pulsar", "Engine", "Beacon", "Cradle", "Catalyst", "Phoenix"
+  ];
+
+  const pIdx = (level * 7) % prefixes.length;
+  const tIdx = (level * 13) % types.length;
+  const name = `${prefixes[pIdx]} ${types[tIdx]} (Level ${level})`;
+
+  // Add random or deterministic celestial properties for variety
+  const hasRings = level % 3 === 1;
+  const ringColor = hasRings ? `hsla(${(hue + 90) % 360}, 80%, 75%, 0.65)` : undefined;
+  const hasStorms = level % 3 === 2;
+  const clouds = level % 3 === 0;
+  const sparkle = level % 2 === 0;
+  const starsCount = level % 2 === 1 ? 12 + excess * 2 : undefined;
+
+  const descriptions = [
+    "A super-massive stellar core of blinding energy.",
+    "A spinning pulsar emitting highly directional radio waves.",
+    "Bending light and space-time into an elegant, infinite loop.",
+    "A brilliant cosmic beacon visible from neighboring dimensions.",
+    "A quantum field fluctuation frozen into a physical orb.",
+    "A majestic stellar structure that challenges modern laws of physics.",
+    "An exotic celestial entity formed by absolute pure condensed dark matter."
+  ];
+  const description = descriptions[level % descriptions.length];
+
+  return {
+    level,
+    name,
+    radius,
+    mass,
+    color,
+    gradientStart,
+    gradientEnd,
+    glowColor,
+    description,
+    hasRings,
+    ringColor,
+    hasStorms,
+    clouds,
+    sparkle,
+    starsCount
+  };
+}
+
 // Inside a standard Suika game, the user can only spawn lower levels.
 // E.g., level 0 to level 4 (Meteorite to Mars) to encourage progressive merging!
 export const MAX_DROP_LEVEL = 4;

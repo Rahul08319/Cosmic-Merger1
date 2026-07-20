@@ -1,6 +1,6 @@
 import React from "react";
 import { CelestialType } from "../types";
-import { CELESTIAL_BODIES } from "../constants";
+import { getCelestialConfig } from "../constants";
 import { Sparkles, Info } from "lucide-react";
 
 interface LegendProps {
@@ -14,7 +14,9 @@ export const ProgressionLegend: React.FC<LegendProps> = ({
   highlightedLevel,
   onSelectLevel,
 }) => {
-  const selectedPlanet = CELESTIAL_BODIES[highlightedLevel] || CELESTIAL_BODIES[0];
+  const selectedPlanet = getCelestialConfig(highlightedLevel);
+  const totalDisplayLevels = Math.max(10, highestLevelMerged);
+  const displayPlanets = Array.from({ length: totalDisplayLevels + 1 }, (_, i) => getCelestialConfig(i));
 
   return (
     <div className="glass-panel rounded-2xl p-5 flex flex-col h-full select-none" id="progression-legend">
@@ -24,13 +26,13 @@ export const ProgressionLegend: React.FC<LegendProps> = ({
           Celestial Cycle
         </h3>
         <span className="text-[10px] font-mono text-purple-300 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
-          {CELESTIAL_BODIES.length} Orders
+          {displayPlanets.length} Orders
         </span>
       </div>
 
       {/* Cyclic Line */}
-      <div className="grid grid-cols-6 gap-2 sm:grid-cols-11 sm:gap-1.5 mb-5 p-2 bg-black/40 rounded-xl border border-white/5">
-        {CELESTIAL_BODIES.map((planet) => {
+      <div className="grid grid-cols-6 gap-2 sm:grid-cols-11 sm:gap-1.5 mb-5 p-2 bg-black/40 rounded-xl border border-white/5 max-h-[140px] overflow-y-auto custom-scrollbar">
+        {displayPlanets.map((planet) => {
           const isMergedYet = planet.level <= highestLevelMerged;
           const isSelected = planet.level === highlightedLevel;
 
@@ -86,7 +88,7 @@ export const ProgressionLegend: React.FC<LegendProps> = ({
             </div>
             
             {/* Visual Indicator of Size Profile */}
-            <div className="w-12 h-12 rounded-full flex items-center justify-center relative shadow-inner overflow-hidden border border-white/10"
+            <div className="w-12 h-12 rounded-full flex items-center justify-center relative shadow-inner overflow-hidden border border-white/10 shrink-0"
               style={{
                 background: `radial-gradient(circle at 30% 30%, ${selectedPlanet.gradientStart}, ${selectedPlanet.gradientEnd})`,
                 boxShadow: `0 0 20px ${selectedPlanet.glowColor}`
@@ -111,8 +113,8 @@ export const ProgressionLegend: React.FC<LegendProps> = ({
         <div className="mt-4 pt-3 border-t border-white/5 flex items-start gap-2 text-[11px] text-purple-300">
           <Info className="w-4 h-4 text-purple-300 shrink-0 mt-0.5" />
           <p>
-            Merge two identical items (e.g. level {selectedPlanet.level}) to merge into a level {Math.min(10, selectedPlanet.level + 1)} body. 
-            {selectedPlanet.level === 10 && " Combining two level 10 singulates creates a cataclysmic Supernova clearing the jar!"}
+            Merge two identical items (level {selectedPlanet.level}) to create a level {selectedPlanet.level + 1} body.
+            {selectedPlanet.level >= 10 && " Combining two high-level singulates creates a cataclysmic shockwave clearing the jar!"}
           </p>
         </div>
       </div>

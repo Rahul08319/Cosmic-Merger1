@@ -1,7 +1,7 @@
 import React from "react";
 import { GameStats, CelestialType } from "../types";
 import { Trophy, Flame, ChevronRight, Zap, RefreshCw, Volume2, VolumeX, HelpCircle } from "lucide-react";
-import { CELESTIAL_BODIES } from "../constants";
+import { getCelestialConfig } from "../constants";
 
 interface ScoreBoardProps {
   stats: GameStats;
@@ -10,8 +10,8 @@ interface ScoreBoardProps {
   canShake: boolean;
   onShake: () => void;
   onRestart: () => void;
-  isMuted: boolean;
-  onToggleMute: () => void;
+  volume: number;
+  onVolumeChange: (vol: number) => void;
   onOpenHelp: () => void;
   initialHighScore: number;
 }
@@ -23,14 +23,25 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
   canShake,
   onShake,
   onRestart,
-  isMuted,
-  onToggleMute,
+  volume,
+  onVolumeChange,
   onOpenHelp,
   initialHighScore,
 }) => {
-  const nextBody = CELESTIAL_BODIES[nextBodyLevel] || CELESTIAL_BODIES[0];
+  const nextBody = getCelestialConfig(nextBodyLevel);
 
   const isNewRecord = stats.score > initialHighScore && stats.score > 0;
+
+  // Local helper to toggle mute via clicking the speaker icon
+  const [prevVolume, setPrevVolume] = React.useState(0.4);
+  const handleIconClick = () => {
+    if (volume > 0) {
+      setPrevVolume(volume);
+      onVolumeChange(0);
+    } else {
+      onVolumeChange(prevVolume > 0 ? prevVolume : 0.4);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 w-full select-none" id="scoreboard-hud">
@@ -125,62 +136,80 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
         </div>
       </div>
 
-      {/* Control Actions Panel (Shake, Refresh, Audio, Help) */}
-      <div className="grid grid-cols-4 gap-2">
-        {/* Gravity Shake */}
-        <button
-          onClick={onShake}
-          disabled={!canShake}
-          id="gravity-shake-btn"
-          className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all duration-300 ${
-            canShake
-              ? "bg-amber-950/20 border-amber-500/40 text-amber-300 hover:bg-amber-900/10 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/5 active:scale-95"
-              : "bg-white/5 border-white/10 text-slate-500 cursor-not-allowed"
-          }`}
-          title="Perturb Gravity layout (Shake!)"
-        >
-          <Zap className={`w-5 h-5 mb-1 ${canShake ? "animate-pulse" : ""}`} />
-          <span className="text-[9px] font-mono leading-none">
-            {canShake ? "SHAKE" : `CD (${Math.ceil(shakeCooldown / 60)}s)`}
+      {/* Control Actions Panel (Shake, Refresh, Help) */}
+      <div className="flex flex-col gap-2 bg-black/20 p-2 rounded-2xl border border-white/5">
+        <div className="grid grid-cols-3 gap-2">
+          {/* Gravity Shake */}
+          <button
+            onClick={onShake}
+            disabled={!canShake}
+            id="gravity-shake-btn"
+            className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300 ${
+              canShake
+                ? "bg-amber-950/20 border-amber-500/40 text-amber-300 hover:bg-amber-900/10 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/5 active:scale-95"
+                : "bg-white/5 border-white/10 text-slate-500 cursor-not-allowed"
+            }`}
+            title="Perturb Gravity layout (Shake!)"
+          >
+            <Zap className={`w-4 h-4 mb-1 ${canShake ? "animate-pulse" : ""}`} />
+            <span className="text-[9px] font-mono leading-none">
+              {canShake ? "SHAKE" : `CD (${Math.ceil(shakeCooldown / 60)}s)`}
+            </span>
+          </button>
+
+          {/* Restart Game */}
+          <button
+            onClick={onRestart}
+            id="restart-game-btn"
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
+            title="Restart System Core"
+          >
+            <RefreshCw className="w-4 h-4 mb-1" />
+            <span className="text-[9px] font-mono leading-none">RESET</span>
+          </button>
+
+          {/* How to Play Help */}
+          <button
+            onClick={onOpenHelp}
+            id="open-how-to-play-btn"
+            className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
+            title="Mission Instructions"
+          >
+            <HelpCircle className="w-4 h-4 mb-1" />
+            <span className="text-[9px] font-mono leading-none">HELP</span>
+          </button>
+        </div>
+
+        {/* Dynamic Volume Range Slider Row */}
+        <div className="flex items-center justify-between gap-3 p-2 px-3 bg-white/5 rounded-xl border border-white/5">
+          <button
+            onClick={handleIconClick}
+            className="text-purple-300 hover:text-white transition-colors duration-150 shrink-0 flex items-center justify-center p-1 hover:bg-white/5 rounded-lg"
+            title="Click to Mute/Unmute Synthesizer"
+          >
+            {volume === 0 ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-purple-300" />}
+          </button>
+          
+          <div className="flex-1 flex items-center gap-2">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-black/40 rounded-lg appearance-none cursor-pointer accent-purple-500 hover:accent-purple-400 transition-all"
+              style={{
+                background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(139, 92, 246) ${volume * 100}%, rgba(255, 255, 255, 0.1) ${volume * 100}%, rgba(255, 255, 255, 0.1) 100%)`
+              }}
+              title="Drag to Adjust Synthesizer Volume"
+            />
+          </div>
+
+          <span className="text-[9px] font-mono text-purple-300/80 w-8 text-right shrink-0">
+            {volume === 0 ? "MUTED" : `${Math.round(volume * 100)}%`}
           </span>
-        </button>
-
-        {/* Restart Game */}
-        <button
-          onClick={onRestart}
-          id="restart-game-btn"
-          className="flex flex-col items-center justify-center p-3 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
-          title="Restart System Core"
-        >
-          <RefreshCw className="w-5 h-5 mb-1" />
-          <span className="text-[9px] font-mono leading-none">RESET</span>
-        </button>
-
-        {/* Mute toggle */}
-        <button
-          onClick={onToggleMute}
-          id="mute-sound-btn"
-          className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-200 active:scale-95 ${
-            isMuted
-              ? "border-rose-950 bg-rose-950/20 text-rose-400 hover:bg-rose-900/20 hover:border-rose-600"
-              : "border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white"
-          }`}
-          title="Toggle System Synthesizer Voice"
-        >
-          {isMuted ? <VolumeX className="w-5 h-5 mb-1" /> : <Volume2 className="w-5 h-5 mb-1" />}
-          <span className="text-[9px] font-mono leading-none">{isMuted ? "MUTED" : "SOUND"}</span>
-        </button>
-
-        {/* How to Play Help */}
-        <button
-          onClick={onOpenHelp}
-          id="open-how-to-play-btn"
-          className="flex flex-col items-center justify-center p-3 rounded-xl border border-white/10 bg-white/5 text-purple-200 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all duration-200 active:scale-95"
-          title="Mission Instructions"
-        >
-          <HelpCircle className="w-5 h-5 mb-1" />
-          <span className="text-[9px] font-mono leading-none">HELP</span>
-        </button>
+        </div>
       </div>
 
       {/* Stats Feedback Bar */}

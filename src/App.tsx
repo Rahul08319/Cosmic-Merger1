@@ -9,12 +9,19 @@ import {
   RefreshCw, 
   Trophy, 
   Volume2, 
-  VolumeX 
+  VolumeX,
+  Award,
+  Globe,
+  Shield,
+  Zap,
+  Activity,
+  X
 } from "lucide-react";
 
 import { PhysicsBody, Particle, GameStats } from "./types";
 import { 
   CELESTIAL_BODIES, 
+  getCelestialConfig,
   CONTAINER_WIDTH, 
   CONTAINER_HEIGHT, 
   DANGER_ZONE_Y, 
@@ -32,12 +39,14 @@ import { CosmicAudio } from "./utils/audio";
 import { ScoreBoard } from "./components/ScoreBoard";
 import { ProgressionLegend } from "./components/ProgressionLegend";
 import { HowToPlay } from "./components/HowToPlay";
+import { HighScoresModal } from "./components/HighScoresModal";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Game flow states
   const [hasStarted, setHasStarted] = useState(false);
+  const [noPossibleMoves, setNoPossibleMoves] = useState(false);
   const [stats, setStats] = useState<GameStats>({
     score: 0,
     highScore: 0,
@@ -62,6 +71,7 @@ export default function App() {
     alpha: number;
     life: number;
     fontSize: number;
+    multiplier?: number;
   }[]>([]);
   const statsRef = useRef(stats);
 
@@ -87,7 +97,9 @@ export default function App() {
 
   // Modals / Overlays
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isHighScoresOpen, setIsHighScoresOpen] = useState(false);
+  const [volume, setVolume] = useState(() => CosmicAudio.getVolume());
+  const [toasts, setToasts] = useState<{ id: string; title: string; description: string; icon: string }[]>([]);
 
   // Load High Score from localStorage on Mount
   useEffect(() => {
@@ -146,7 +158,7 @@ export default function App() {
       // Handle Merges inside Collision Resolution
       const onBodiesMerge = (midX: number, midY: number, level: number, b1: PhysicsBody, b2: PhysicsBody) => {
         const nextLevel = level + 1;
-        const config = CELESTIAL_BODIES[nextLevel];
+        const config = getCelestialConfig(nextLevel);
         const isSupernova = nextLevel === 10 && level === 9; // Black hole merger!
 
         // Create the newly fused larger body
@@ -185,6 +197,7 @@ export default function App() {
           alpha: 1.0,
           life: 45,
           fontSize: currentCombo > 1 ? 14 : 12,
+          multiplier: currentCombo,
         });
         
         // Spawn glowing stardust explosions
@@ -200,7 +213,7 @@ export default function App() {
           bodiesRef.current = bodiesRef.current.filter(b => {
             if (b.id === mergedBody.id) return true;
             if (b.level <= 4) {
-              spawnMergeParticles(b.x, b.y, CELESTIAL_BODIES[b.level].color, particlesRef.current, 6, false);
+              spawnMergeParticles(b.x, b.y, getCelestialConfig(b.level).color, particlesRef.current, 6, false);
               return false; // delete
             }
             return true;
@@ -248,6 +261,19 @@ export default function App() {
         CONTAINER_WIDTH,
         CONTAINER_HEIGHT
       );
+
+      // Check if there are no immediate merges possible in the jar
+      const nonGhostBodies = bodiesRef.current.filter(b => !b.isGhost);
+      const levels = nonGhostBodies.map(b => b.level);
+      const hasIdentical = levels.length !== new Set(levels).size;
+      const noMoves = nonGhostBodies.length >= 3 && !hasIdentical;
+      
+      setNoPossibleMoves(prev => {
+        if (prev !== noMoves) {
+          return noMoves;
+        }
+        return prev;
+      });
 
       // Check Danger zone violation
       // Check settled bodies intersecting the target threshold
@@ -491,7 +517,7 @@ export default function App() {
 
       // Paint active physics bodies
       for (const b of bodiesRef.current) {
-        const config = CELESTIAL_BODIES[b.level];
+        const config = getCelestialConfig(b.level);
         ctx.save();
         
         // Move drawing coordinate center to body space
@@ -685,7 +711,7 @@ export default function App() {
 
       // Draw active currently held dropping preview element
       if (isHolding && !dropCooldown && !statsRef.current.isGameOver) {
-        const heldConfig = CELESTIAL_BODIES[currentHeldLevel];
+        const heldConfig = getCelestialConfig(currentHeldLevel);
         ctx.save();
         ctx.translate(previewX, 60);
         ctx.globalAlpha = 0.85;
@@ -718,12 +744,42 @@ export default function App() {
       for (const ft of floatingTextsRef.current) {
         ctx.save();
         ctx.globalAlpha = ft.alpha;
+
+        // Calculate dynamic pop scale
+        const age = 45 - ft.life;
+        const mult = ft.multiplier || 1;
+        // High multipliers pop even more dramatically!
+        const maxPop = mult > 1 ? 1.65 + (mult * 0.12) : 1.35;
+        
+        let scale = 1.0;
+        if (age < 12) {
+          const t = age / 12;
+          // Smooth sinus pop-up and settle animation
+          scale = maxPop * Math.sin(t * Math.PI * 0.85);
+        } else {
+          // Settle down and shrink slightly towards the end
+          const decayRatio = ft.life / 33;
+          scale = 1.0 * Math.min(1.0, decayRatio);
+        }
+
+        // Apply transformations relative to the text coordinate
+        ctx.translate(ft.x, ft.y);
+        ctx.scale(scale, scale);
+
         ctx.font = `bold ${ft.fontSize}px 'Space Grotesk', system-ui, sans-serif`;
         ctx.fillStyle = ft.color;
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = ft.color;
+
+        // Add visual intensity glow for high multipliers
+        if (mult > 1) {
+          ctx.shadowBlur = 12 + mult * 2.5;
+          ctx.shadowColor = ft.color;
+        } else {
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = ft.color;
+        }
+
         ctx.textAlign = "center";
-        ctx.fillText(ft.text, ft.x, ft.y);
+        ctx.fillText(ft.text, 0, 0);
         ctx.restore();
 
         // Float up and decay alpha
@@ -784,7 +840,7 @@ export default function App() {
 
   const handleStartGame = () => {
     CosmicAudio.init(); // safely trigger Audio context on user action click
-    setIsMuted(CosmicAudio.getMuted());
+    setVolume(CosmicAudio.getVolume());
     setHasStarted(true);
   };
 
@@ -827,10 +883,130 @@ export default function App() {
     setShakeCooldown(650); // reset frame cooldown (approx 10-11 seconds)
   };
 
-  const handleToggleMute = () => {
-    const nextVal = CosmicAudio.toggleMute();
-    setIsMuted(nextVal);
+  const handleVolumeChange = (newVol: number) => {
+    setVolume(newVol);
+    CosmicAudio.setVolume(newVol);
   };
+
+  // Save highscore entry on Game Over
+  useEffect(() => {
+    if (stats.isGameOver && stats.score > 0) {
+      const stored = localStorage.getItem("cosmic_high_scores_list");
+      let list = [];
+      if (stored) {
+        try {
+          list = JSON.parse(stored);
+        } catch (e) {}
+      }
+      const newEntry = {
+        id: Math.random().toString(36).substring(2, 9),
+        score: stats.score,
+        merges: stats.mergesCount,
+        date: new Date().toISOString()
+      };
+      list.push(newEntry);
+      list.sort((a: any, b: any) => b.score - a.score);
+      list = list.slice(0, 10);
+      localStorage.setItem("cosmic_high_scores_list", JSON.stringify(list));
+    }
+  }, [stats.isGameOver]);
+
+  // Monitor milestone thresholds
+  const checkMilestones = (currentScore: number, mergesCount: number, maxLevel: number) => {
+    let unlocked: string[] = [];
+    try {
+      const stored = localStorage.getItem("cosmic_unlocked_milestones");
+      if (stored) {
+        unlocked = JSON.parse(stored);
+      }
+    } catch (e) {}
+
+    const milestonesToCheck = [
+      {
+        id: "first_merge",
+        title: "Stellar Nucleosynthesis",
+        description: "Initiate your very first fusion reaction in the core.",
+        condition: mergesCount >= 1,
+        icon: "Sparkles"
+      },
+      {
+        id: "score_500",
+        title: "Nebula Navigator",
+        description: "Generate 500 Vortex Energy units.",
+        condition: currentScore >= 500,
+        icon: "Zap"
+      },
+      {
+        id: "merges_25",
+        title: "Gravity Tamer",
+        description: "Successfully complete 25 consolidations.",
+        condition: mergesCount >= 25,
+        icon: "Shield"
+      },
+      {
+        id: "merges_100",
+        title: "Cosmic Consolidator",
+        description: "Reach 100 consolidations across space-time.",
+        condition: mergesCount >= 100,
+        icon: "Award"
+      },
+      {
+        id: "level_5",
+        title: "Gas Giant Synthesizer",
+        description: "Sustain a massive level 5 gas giant.",
+        condition: maxLevel >= 5,
+        icon: "Globe"
+      },
+      {
+        id: "level_9",
+        title: "Event Horizon",
+        description: "Accrete a level 9 super-massive Black Hole.",
+        condition: maxLevel >= 9,
+        icon: "Activity"
+      },
+      {
+        id: "score_10000",
+        title: "Vortex Overlord",
+        description: "Accumulate a staggering 10,000 Vortex Energy units.",
+        condition: currentScore >= 10000,
+        icon: "Trophy"
+      }
+    ];
+
+    let newlyUnlocked = false;
+    const nextUnlocked = [...unlocked];
+
+    for (const m of milestonesToCheck) {
+      if (m.condition && !unlocked.includes(m.id)) {
+        nextUnlocked.push(m.id);
+        newlyUnlocked = true;
+
+        // Trigger toast
+        const toastId = Math.random().toString();
+        setToasts(prev => [...prev, { id: toastId, title: m.title, description: m.description, icon: m.icon }]);
+        
+        // Play warm, nice unlock chime pop!
+        CosmicAudio.playMergePop(8);
+
+        // Auto remove after 4.5 seconds
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== toastId));
+        }, 4500);
+      }
+    }
+
+    if (newlyUnlocked) {
+      try {
+        localStorage.setItem("cosmic_unlocked_milestones", JSON.stringify(nextUnlocked));
+      } catch (e) {}
+    }
+  };
+
+  useEffect(() => {
+    if (hasStarted) {
+      checkMilestones(stats.score, stats.mergesCount, highestLevelMerged);
+    }
+  }, [stats.score, stats.mergesCount, highestLevelMerged, hasStarted]);
 
   return (
     <div className="min-h-screen bg-[#0d0221] text-slate-100 flex flex-col font-sans relative overflow-x-hidden" id="cosmic-root">
@@ -855,9 +1031,20 @@ export default function App() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/5 p-1.5 px-3 rounded-full border border-white/10 shrink-0">
-            <div className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-ping shrink-0" />
-            <span className="text-[11px] font-mono text-purple-300">CORE TELEMETRY: NOMINAL</span>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setIsHighScoresOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 text-xs font-mono rounded-xl border border-amber-500/30 transition-all duration-200 active:scale-95"
+              id="header-high-scores-btn"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              HIGH SCORES
+            </button>
+
+            <div className="flex items-center gap-2 bg-white/5 p-1.5 px-3 rounded-full border border-white/10 shrink-0">
+              <div className="w-2 h-2 rounded-full bg-purple-500 animate-ping shrink-0" />
+              <span className="text-[11px] font-mono text-purple-300">TELEMETRY: NOMINAL</span>
+            </div>
           </div>
         </header>
 
@@ -892,16 +1079,26 @@ export default function App() {
               <button
                 onClick={handleStartGame}
                 id="btn-mission-start"
-                className="w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-500 text-white font-display font-medium rounded-2xl text-base shadow-xl shadow-purple-600/20 active:scale-95 transition-all duration-300 flex items-center justify-center gap-2"
+                className="w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-500 text-white font-display font-medium rounded-2xl text-base shadow-xl shadow-purple-600/20 active:scale-95 transition-all duration-300 flex items-center justify-center gap-2 mx-auto"
               >
                 <Play className="w-5 h-5 fill-current" />
                 Initialize Mission
               </button>
 
-              <div className="mt-8 flex items-center justify-center gap-5 text-xs text-white/55 font-mono">
-                <div>SOUND: DYNAMIC SYNTH</div>
-                <div>•</div>
-                <div>COOLDOWN SHAKES: READY</div>
+              <div className="mt-8 flex flex-col items-center justify-center gap-3.5 text-xs text-white/55 font-mono">
+                <button
+                  onClick={() => setIsHighScoresOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 text-xs rounded-xl border border-amber-500/20 transition-all duration-200 active:scale-95"
+                  id="intro-high-scores-btn"
+                >
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  VIEW TELEMETRY & HIGH SCORES
+                </button>
+                <div className="flex items-center gap-3 text-[10px] opacity-75">
+                  <span>SOUND: DYNAMIC SYNTH</span>
+                  <span>•</span>
+                  <span>COOLDOWN SHAKES: READY</span>
+                </div>
               </div>
             </motion.div>
           ) : (
@@ -918,6 +1115,26 @@ export default function App() {
               {/* LEFT/CENTER COLUMN: THE COSMIC JAR (GAME CANVAS) */}
               <div className="col-span-1 lg:col-span-7 flex flex-col items-center">
                 
+                {noPossibleMoves && !stats.isGameOver && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="w-full mb-3 bg-amber-500/15 border border-amber-500/30 rounded-xl p-3 px-4 flex items-center justify-between text-xs text-amber-200 font-mono shadow-lg shadow-amber-500/5 relative overflow-hidden"
+                    style={{ maxWidth: `${CONTAINER_WIDTH}px` }}
+                    id="no-moves-warning"
+                  >
+                    <div className="absolute inset-0 bg-amber-500/5 animate-pulse pointer-events-none" />
+                    <span className="flex items-center gap-2 relative z-10">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
+                      <span>NO IMMEDIATE MERGES POSSIBLE</span>
+                    </span>
+                    <span className="text-[10px] bg-amber-500 text-black px-1.5 py-0.5 rounded font-bold tracking-tight animate-pulse relative z-10">
+                      TRY 'SHAKE' / 'CLEAR'
+                    </span>
+                  </motion.div>
+                )}
+
                 {/* Physical Jar Frame */}
                 <div 
                   className="w-full relative jar-container overflow-hidden select-none flex flex-col"
@@ -998,26 +1215,38 @@ export default function App() {
               {/* RIGHT COLUMN: CORE DASHBOARD & PROGRESSION LEGEND */}
               <div className="col-span-1 lg:col-span-5 flex flex-col gap-6">
                 
-                {/* HUD Panels containing stats, next drop, volume */}
-                <ScoreBoard
-                  stats={stats}
-                  nextBodyLevel={nextHeldLevel}
-                  shakeCooldown={shakeCooldown}
-                  canShake={shakeCooldown === 0}
-                  onShake={triggerGravityShake}
-                  onRestart={restartGame}
-                  isMuted={isMuted}
-                  onToggleMute={handleToggleMute}
-                  onOpenHelp={() => setIsHelpOpen(true)}
-                  initialHighScore={initialHighScoreRef.current}
-                />
+                {/* HUD Panels containing stats, next drop, volume (Animated sliding entrance) */}
+                <motion.div
+                  initial={{ opacity: 0, y: 25 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.15, ease: "easeOut" }}
+                >
+                  <ScoreBoard
+                    stats={stats}
+                    nextBodyLevel={nextHeldLevel}
+                    shakeCooldown={shakeCooldown}
+                    canShake={shakeCooldown === 0}
+                    onShake={triggerGravityShake}
+                    onRestart={restartGame}
+                    volume={volume}
+                    onVolumeChange={handleVolumeChange}
+                    onOpenHelp={() => setIsHelpOpen(true)}
+                    initialHighScore={initialHighScoreRef.current}
+                  />
+                </motion.div>
 
-                {/* Legend inspect flow card */}
-                <ProgressionLegend
-                  highestLevelMerged={highestLevelMerged}
-                  highlightedLevel={highlightedInspectLevel}
-                  onSelectLevel={(level) => setHighlightedInspectLevel(level)}
-                />
+                {/* Legend inspect flow card (Animated staggered sliding entrance) */}
+                <motion.div
+                  initial={{ opacity: 0, y: 25 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.3, ease: "easeOut" }}
+                >
+                  <ProgressionLegend
+                    highestLevelMerged={highestLevelMerged}
+                    highlightedLevel={highlightedInspectLevel}
+                    onSelectLevel={(level) => setHighlightedInspectLevel(level)}
+                  />
+                </motion.div>
 
               </div>
             </motion.div>
@@ -1030,6 +1259,56 @@ export default function App() {
           onClose={() => setIsHelpOpen(false)}
         />
 
+        {/* Modal High Scores and Achievements History */}
+        <HighScoresModal
+          isOpen={isHighScoresOpen}
+          onClose={() => setIsHighScoresOpen(false)}
+        />
+
+        {/* Toast Notification Layer (Milestones) */}
+        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2.5 pointer-events-none max-w-sm w-full p-4 md:p-0" id="cosmic-toasts-container">
+          <AnimatePresence>
+            {toasts.map((toast) => (
+              <motion.div
+                key={toast.id}
+                initial={{ opacity: 0, x: 50, y: -20, scale: 0.9 }}
+                animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 50, y: -10, scale: 0.95 }}
+                transition={{ type: "spring", damping: 18, stiffness: 220 }}
+                className="pointer-events-auto bg-black/90 border border-purple-500/40 p-4 rounded-xl shadow-2xl flex items-start gap-3.5 backdrop-blur-md relative overflow-hidden"
+              >
+                {/* Background ambient glow inside toast */}
+                <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl pointer-events-none" />
+                
+                <div className="w-10 h-10 rounded-lg bg-purple-600/20 border border-purple-500/30 flex items-center justify-center shrink-0">
+                  {toast.icon === "Sparkles" && <Sparkles className="w-5 h-5 text-amber-400" />}
+                  {toast.icon === "Zap" && <Zap className="w-5 h-5 text-indigo-400" />}
+                  {toast.icon === "Shield" && <Shield className="w-5 h-5 text-emerald-400" />}
+                  {toast.icon === "Award" && <Award className="w-5 h-5 text-violet-400" />}
+                  {toast.icon === "Globe" && <Globe className="w-5 h-5 text-cyan-400" />}
+                  {toast.icon === "Activity" && <Activity className="w-5 h-5 text-pink-400" />}
+                  {toast.icon === "Trophy" && <Trophy className="w-5 h-5 text-amber-400" />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono font-bold tracking-wider text-purple-400">MILESTONE ACHIEVED</span>
+                    <button
+                      onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                      className="text-purple-300 hover:text-white p-0.5 rounded-full hover:bg-white/5 transition-colors"
+                      title="Dismiss Toast"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <h4 className="text-[13px] font-bold font-display text-white mt-1 leading-tight">{toast.title}</h4>
+                  <p className="text-xs text-purple-200/80 leading-normal mt-1">{toast.description}</p>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+
         {/* Game Over Shockwave Backdrop Dialog Overlay */}
         <AnimatePresence>
           {stats.isGameOver && (
@@ -1038,8 +1317,31 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               id="gameover-overlay"
-              className="fixed inset-0 bg-black/85 backdrop-blur-lg flex items-center justify-center z-50 p-4"
+              className="fixed inset-0 bg-black/85 backdrop-blur-lg flex items-center justify-center z-50 p-4 overflow-hidden"
             >
+              {/* Subtle animated expanding/collapsing radial gradient simulating final implosion */}
+              <motion.div
+                initial={{ scale: 3.0, opacity: 0.15 }}
+                animate={{ 
+                  scale: [3.0, 0.1, 3.5, 2.0], 
+                  opacity: [0.15, 0.9, 0.0, 0.15] 
+                }}
+                transition={{ 
+                  duration: 5.0, 
+                  repeat: Infinity, 
+                  ease: "easeOut",
+                  times: [0, 0.4, 0.65, 1.0]
+                }}
+                className="absolute inset-0 pointer-events-none mix-blend-screen flex items-center justify-center"
+              >
+                <div 
+                  className="w-[100vw] h-[100vw] max-w-[1200px] max-h-[1200px] rounded-full blur-3xl"
+                  style={{
+                    background: "radial-gradient(circle, rgba(244, 63, 94, 0.45) 0%, rgba(139, 92, 246, 0.2) 45%, transparent 70%)"
+                  }}
+                />
+              </motion.div>
+
               <motion.div
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}

@@ -1,5 +1,5 @@
 import { PhysicsBody, Particle, CelestialType } from "../types";
-import { CELESTIAL_BODIES, CONTAINER_WIDTH, CONTAINER_HEIGHT } from "../constants";
+import { getCelestialConfig, CONTAINER_WIDTH, CONTAINER_HEIGHT } from "../constants";
 
 // Helper to generate a unique ID
 export function generateId(): string {
@@ -13,7 +13,7 @@ export function createPhysicsBody(
   level: number,
   isGhost = false
 ): PhysicsBody {
-  const config = CELESTIAL_BODIES[level];
+  const config = getCelestialConfig(level);
   return {
     id: generateId(),
     x,
@@ -126,8 +126,8 @@ export function resolveCircleCollisions(
           const nx = dist === 0 ? 1 : dx / dist;
           const ny = dist === 0 ? 0 : dy / dist;
 
-          // Merge Condition! Same level and we haven't maxed out levels
-          if (b1.level === b2.level && b1.level < CELESTIAL_BODIES.length - 1) {
+          // Merge Condition! Same level (unlimited merges)
+          if (b1.level === b2.level) {
             mergedIds.add(b1.id);
             mergedIds.add(b2.id);
 
@@ -266,12 +266,30 @@ export function updateTrailAndMoveParticles(
     p.vx *= 0.97;
     p.vy *= 0.97;
 
+    // Gently bounce off boundaries (left, right, top, bottom)
+    const padding = p.radius;
+    if (p.x - padding < 0) {
+      p.x = padding;
+      p.vx = -p.vx * 0.65; // reverse and damp
+    } else if (p.x + padding > width) {
+      p.x = width - padding;
+      p.vx = -p.vx * 0.65; // reverse and damp
+    }
+
+    if (p.y - padding < 0) {
+      p.y = padding;
+      p.vy = -p.vy * 0.65; // reverse and damp
+    } else if (p.y + padding > height) {
+      p.y = height - padding;
+      p.vy = -p.vy * 0.65; // reverse and damp
+    }
+
     p.life--;
     const ratio = Math.max(0, p.life / p.maxLife);
     p.alpha = Math.pow(ratio, 1.5);
     p.spin += p.spinSpeed;
   }
   
-  // Clean up dead particles
-  return particles.filter(p => p.life > 0 && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height);
+  // Clean up dead particles (or ones that escape completely)
+  return particles.filter(p => p.life > 0 && p.x >= -20 && p.x <= width + 20 && p.y >= -20 && p.y <= height + 20);
 }
